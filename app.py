@@ -380,7 +380,6 @@ def render_figure_html(
     group_html = []
     for index, group in enumerate(groups):
         mood = group.get("fish_mood", "good")
-        fish_label = labels["evil_fish_label"] if mood == "evil" else labels["good_fish_label"]
         fish = fish_image_html(mood)
         top_table = render_table_html(labels["top_section"], group["top"], group["columns"], labels["row_label"])
         bottom_table = render_table_html(labels["bottom_section"], group["bottom"], group["columns"], labels["row_label"], show_header=False)
@@ -390,10 +389,8 @@ def render_figure_html(
               <header class="group-header">
                 <div class="fish-box">
                   {fish}
-                  <div class="fish-caption">{html.escape(fish_label)}</div>
                 </div>
                 <div class="group-title">
-                  <span>{html.escape(labels["group_caption"])}</span>
                   <h2>{html.escape(group["label"])}</h2>
                 </div>
               </header>
@@ -511,28 +508,14 @@ def render_figure_html(
         .fish-svg,
         .fish-img {{
           width: 100%;
-          max-width: 180px;
-          max-height: 92px;
+          max-width: 190px;
+          max-height: 106px;
           height: auto;
           object-fit: contain;
           display: block;
         }}
-        .fish-caption {{
-          margin-top: 2px;
-          color: var(--muted);
-          font-size: 13px;
-          font-weight: 700;
-          text-align: center;
-        }}
-        .group-title span {{
-          display: block;
-          color: var(--muted);
-          font-size: 13px;
-          font-weight: 700;
-          text-transform: uppercase;
-        }}
         .group-title h2 {{
-          margin: 5px 0 0;
+          margin: 0;
           font-size: 28px;
           line-height: 1.05;
           overflow-wrap: anywhere;
@@ -1097,32 +1080,14 @@ def draw_group_png(
     draw.rectangle((x + 3, y + 3, x + width - 3, y + header_h), fill=header_fill)
     draw.line((x, y + header_h, x + width, y + header_h), fill=line, width=5)
 
-    fish_box = (x + 42, y + 38, x + 510, y + 226)
+    fish_box = (x + 38, y + 36, x + 520, y + 258)
     paste_fish_asset_png(image, draw, fish_box, mood)
-    fish_label = labels["evil_fish_label"] if mood == "evil" else labels["good_fish_label"]
-    draw_wrapped_text(
-        draw,
-        fish_label,
-        (x + 40, y + 220, x + 515, y + header_h - 24),
-        fonts["caption"],
-        (89, 100, 111),
-        padding=8,
-    )
 
     title_x = x + 560
     draw_wrapped_text(
         draw,
-        labels["group_caption"].upper(),
-        (title_x, y + 62, x + width - 42, y + 110),
-        fonts["overline"],
-        (89, 100, 111),
-        align="left",
-        padding=0,
-    )
-    draw_wrapped_text(
-        draw,
         group["label"],
-        (title_x, y + 112, x + width - 42, y + header_h - 40),
+        (title_x, y + 82, x + width - 42, y + header_h - 58),
         fonts["group"],
         line,
         align="left",
@@ -1194,9 +1159,7 @@ def render_png_visualization(
         "title": get_font(72, True),
         "subtitle": get_font(34),
         "legend": get_font(30, True),
-        "overline": get_font(29, True),
         "group": get_font(64, True),
-        "caption": get_font(29, True),
         "section": get_font(32, True),
         "table_header": get_font(28, True),
         "row": get_font(27, True),
@@ -1245,12 +1208,9 @@ def default_labels() -> dict[str, str]:
     return {
         "title": "Zebrafish: Neurotoxicity and Neuroactivity",
         "subtitle": "The color of the cell reflects the direction of change; mixed arrows are colored in two halves.",
-        "group_caption": "Group",
         "top_section": "Metabolites and neurotransmitter systems",
         "bottom_section": "Behavioral indicators",
         "row_label": "Parameter",
-        "good_fish_label": "",
-        "evil_fish_label": "",
         "up_label": "Increase: ↑",
         "down_label": "Decrease: ↓",
         "mixed_label": "Opposite directions: ↑↓",
@@ -1263,12 +1223,9 @@ def sidebar_text_labels(labels: dict[str, str], token: str) -> dict[str, str]:
     with st.sidebar.expander("Текстовые подписи", expanded=True):
         edited["title"] = st.text_input("Заголовок", edited["title"], key=f"{token}_title")
         edited["subtitle"] = st.text_area("Подзаголовок", edited["subtitle"], key=f"{token}_subtitle", height=72)
-        edited["group_caption"] = st.text_input("Подпись над группой", edited["group_caption"], key=f"{token}_group_caption")
         edited["top_section"] = st.text_input("Раздел сверху", edited["top_section"], key=f"{token}_top_section")
         edited["bottom_section"] = st.text_input("Раздел снизу", edited["bottom_section"], key=f"{token}_bottom_section")
         edited["row_label"] = st.text_input("Заголовок первого столбца", edited["row_label"], key=f"{token}_row_label")
-        edited["evil_fish_label"] = st.text_input("Подпись злой рыбки", edited["evil_fish_label"], key=f"{token}_evil_fish")
-        edited["good_fish_label"] = st.text_input("Подпись доброй рыбки", edited["good_fish_label"], key=f"{token}_good_fish")
     with st.sidebar.expander("Легенда и цвета", expanded=False):
         edited["up_label"] = st.text_input("Подпись ↑", edited["up_label"], key=f"{token}_up_label")
         edited["down_label"] = st.text_input("Подпись ↓", edited["down_label"], key=f"{token}_down_label")

@@ -640,13 +640,16 @@ def get_font(size: int, bold: bool = False) -> ImageFont.ImageFont:
     if key in FONT_CACHE:
         return FONT_CACHE[key]
 
+    local_font_dir = Path(__file__).with_name("fonts")
     regular_candidates = [
+        local_font_dir / "DejaVuSans.ttf",
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
         "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf",
         "C:/Windows/Fonts/arial.ttf",
         "C:/Windows/Fonts/segoeui.ttf",
     ]
     bold_candidates = [
+        local_font_dir / "DejaVuSans-Bold.ttf",
         "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
         "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf",
         "C:/Windows/Fonts/arialbd.ttf",
@@ -655,7 +658,7 @@ def get_font(size: int, bold: bool = False) -> ImageFont.ImageFont:
 
     for font_path in bold_candidates if bold else regular_candidates:
         if Path(font_path).exists():
-            FONT_CACHE[key] = ImageFont.truetype(font_path, size=size)
+            FONT_CACHE[key] = ImageFont.truetype(str(font_path), size=size)
             return FONT_CACHE[key]
 
     FONT_CACHE[key] = ImageFont.load_default()

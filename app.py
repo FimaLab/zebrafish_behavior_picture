@@ -12,7 +12,6 @@ from typing import Any
 
 import pandas as pd
 import streamlit as st
-import streamlit.components.v1 as components
 from openpyxl import load_workbook
 from openpyxl.utils import get_column_letter
 from PIL import Image, ImageDraw, ImageFont
@@ -24,6 +23,10 @@ FONT_CACHE: dict[tuple[int, bool], ImageFont.ImageFont] = {}
 FISH_ASSET_FILES = {
     "evil": "bad_fish.png",
     "good": "good_fish.png",
+}
+DEFAULT_LAYOUT = {
+    "row_width": 650,
+    "cell_width": 260,
 }
 
 
@@ -949,6 +952,19 @@ def cell_fill_png(value: str, colors: dict[str, tuple[int, int, int]]) -> tuple[
     return ("solid", colors["empty"])
 
 
+def normalize_layout(layout: dict[str, int] | None = None) -> dict[str, int]:
+    merged = DEFAULT_LAYOUT.copy()
+    if layout:
+        merged.update({key: int(value) for key, value in layout.items() if key in merged})
+    merged["row_width"] = max(360, min(1100, merged["row_width"]))
+    merged["cell_width"] = max(150, min(460, merged["cell_width"]))
+    return merged
+
+
+def group_png_width(group: dict[str, Any], layout: dict[str, int]) -> int:
+    return layout["row_width"] + len(group["columns"]) * layout["cell_width"]
+
+
 def measure_table_height(
     draw: ImageDraw.ImageDraw,
     rows: list[dict[str, str]],
@@ -995,9 +1011,10 @@ def draw_table_png(
     colors: dict[str, tuple[int, int, int]],
     fonts: dict[str, ImageFont.ImageFont],
     line: tuple[int, int, int],
+    layout: dict[str, int],
     show_header: bool = True,
 ) -> int:
-    widths = {"row": 650, "cell": max(220, (width - 650) // max(1, len(columns)))}
+    widths = {"row": layout["row_width"], "cell": layout["cell_width"]}
     section_h = 78
     _, row_heights = measure_table_height(draw, rows, columns, row_label_title, widths, fonts, show_header=show_header)
 
@@ -1054,9 +1071,9 @@ def measure_group_height(
     group: dict[str, Any],
     labels: dict[str, str],
     fonts: dict[str, ImageFont.ImageFont],
+    layout: dict[str, int],
 ) -> int:
-    width = 650 + len(group["columns"]) * 260
-    widths = {"row": 650, "cell": 260}
+    widths = {"row": layout["row_width"], "cell": layout["cell_width"]}
     top_h, _ = measure_table_height(draw, group["top"], group["columns"], labels["row_label"], widths, fonts)
     bottom_h, _ = measure_table_height(draw, group["bottom"], group["columns"], labels["row_label"], widths, fonts, show_header=False)
     return 310 + top_h + bottom_h + 4
@@ -1073,6 +1090,7 @@ def draw_group_png(
     labels: dict[str, str],
     colors: dict[str, tuple[int, int, int]],
     fonts: dict[str, ImageFont.ImageFont],
+    layout: dict[str, int],
 ) -> None:
     line = (23, 33, 43)
     header_h = 310
@@ -1099,8 +1117,8 @@ def draw_group_png(
     )
 
     cy = y + header_h
-    cy = draw_table_png(draw, x, cy, width, labels["top_section"], group["top"], group["columns"], labels["row_label"], colors, fonts, line)
-    draw_table_png(draw, x, cy, width, labels["bottom_section"], group["bottom"], group["columns"], labels["row_label"], colors, fonts, line, show_header=False)
+    cy = draw_table_png(draw, x, cy, width, labels["top_section"], group["top"], group["columns"], labels["row_label"], colors, fonts, line, layout)
+    draw_table_png(draw, x, cy, width, labels["bottom_section"], group["bottom"], group["columns"], labels["row_label"], colors, fonts, line, layout, show_header=False)
 
 
 def draw_legend_png(
@@ -1151,8 +1169,10 @@ def render_png_visualization(
     groups: list[dict[str, Any]],
     labels: dict[str, str],
     color_values: dict[str, str],
+    layout: dict[str, int] | None = None,
     dpi: int = 600,
 ) -> bytes:
+    layout = normalize_layout(layout)
     colors = {key: hex_to_rgb(value) for key, value in color_values.items()}
     colors.setdefault("up", (255, 143, 112))
     colors.setdefault("down", (124, 199, 255))
@@ -1172,8 +1192,8 @@ def render_png_visualization(
 
     scratch = Image.new("RGBA", (10, 10), (255, 255, 255, 0))
     scratch_draw = ImageDraw.Draw(scratch)
-    group_widths = [650 + len(group["columns"]) * 260 for group in groups]
-    group_heights = [measure_group_height(scratch_draw, group, labels, fonts) for group in groups]
+    group_widths = [group_png_width(group, layout) for group in groups]
+    group_heights = [measure_group_height(scratch_draw, group, labels, fonts, layout) for group in groups]
 
     margin = 90
     gap = 90
@@ -1198,7 +1218,7 @@ def render_png_visualization(
     x = margin
     y = margin + title_h
     for group, group_width, group_height in zip(groups, group_widths, group_heights):
-        draw_group_png(image, draw, x, y, group_width, group_height, group, labels, colors, fonts)
+        draw_group_png(image, draw, x, y, group_width, group_height, group, labels, colors, fonts, layout)
         x += group_width + gap
 
     output = BytesIO()
@@ -1244,6 +1264,28 @@ def sidebar_colors(token: str) -> dict[str, str]:
         neutral = st.color_picker("-", "#e8edf0", key=f"{token}_neutral_color")
         empty = st.color_picker("Пусто", "#ffffff", key=f"{token}_empty_color")
     return {"up": up, "down": down, "neutral": neutral, "empty": empty}
+
+
+def sidebar_layout_controls(token: str) -> dict[str, int]:
+    with st.sidebar.expander("Ширина колонок PNG", expanded=True):
+        row_width = st.slider(
+            "Первый столбец с показателями",
+            min_value=420,
+            max_value=950,
+            value=DEFAULT_LAYOUT["row_width"],
+            step=10,
+            key=f"{token}_row_width",
+        )
+        cell_width = st.slider(
+            "Колонки препаратов",
+            min_value=180,
+            max_value=380,
+            value=DEFAULT_LAYOUT["cell_width"],
+            step=10,
+            key=f"{token}_cell_width",
+        )
+        st.caption("Эти настройки влияют на PNG-превью и скачиваемую PNG-картинку.")
+    return {"row_width": row_width, "cell_width": cell_width}
 
 
 def edit_group(group: dict[str, Any], labels: dict[str, str], token: str) -> dict[str, Any]:
@@ -1348,6 +1390,7 @@ def main() -> None:
     st.sidebar.caption(f"Источник: {file_name}")
     labels = sidebar_text_labels(default_labels(), token)
     colors = sidebar_colors(token)
+    layout = sidebar_layout_controls(token)
 
     st.caption(
         f"Лист: `{parsed['sheet']}`. Строка с препаратами: `{parsed['header_row']}`. "
@@ -1362,21 +1405,19 @@ def main() -> None:
 
     st.divider()
     st.subheader("Визуализация")
-    figure_html = render_figure_html(edited_groups, labels, colors)
-    components.html(figure_html, height=estimate_height(edited_groups), scrolling=True)
-    png_bytes = render_png_visualization(edited_groups, labels, colors, dpi=600)
+    png_bytes = render_png_visualization(edited_groups, labels, colors, layout=layout, dpi=600)
+    preview_size = Image.open(BytesIO(png_bytes)).size
+    st.caption(
+        f"PNG-превью готовой картинки: {preview_size[0]} x {preview_size[1]} px, "
+        f"первый столбец {layout['row_width']} px, колонки препаратов {layout['cell_width']} px."
+    )
+    st.image(png_bytes, use_container_width=True)
     st.download_button(
         "Скачать PNG 600 dpi",
         data=png_bytes,
         file_name="zebrafish_visualization_600dpi.png",
         mime="image/png",
         type="primary",
-    )
-    st.download_button(
-        "Скачать HTML-визуализацию",
-        data=figure_html.encode("utf-8"),
-        file_name="zebrafish_visualization.html",
-        mime="text/html",
     )
 
 

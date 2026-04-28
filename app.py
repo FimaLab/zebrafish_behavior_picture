@@ -215,6 +215,24 @@ def cell_class(value: str) -> str:
     return "empty"
 
 
+def arrow_directions(value: str) -> list[str]:
+    return [char for char in value if char in "↑↓"]
+
+
+def mixed_cell_gradient(value: str) -> str:
+    directions = arrow_directions(value)
+    if len(directions) < 2:
+        return ""
+
+    stops = []
+    for index, direction in enumerate(directions):
+        css_color = "var(--up)" if direction == "↑" else "var(--down)"
+        start = index * 100 / len(directions)
+        end = (index + 1) * 100 / len(directions)
+        stops.append(f"{css_color} {start:.3f}% {end:.3f}%")
+    return f"background: linear-gradient(90deg, {', '.join(stops)});"
+
+
 def fish_asset_path(mood: str) -> Path:
     mood = "evil" if mood == "evil" else "good"
     return Path(__file__).with_name(FISH_ASSET_FILES[mood])
@@ -353,10 +371,15 @@ def render_table_html(
         cells = [f"<th class='row-name'>{label}</th>"]
         for column in columns:
             value = row.get(column["key"], "")
+            class_name = cell_class(value)
+            style = mixed_cell_gradient(value) if class_name == "mixed" else ""
+            style_attr = f' style="{style}"' if style else ""
             cells.append(
                 "<td class='arrow-cell "
-                + cell_class(value)
-                + "'><span>"
+                + class_name
+                + "'"
+                + style_attr
+                + "><span>"
                 + html.escape(value)
                 + "</span></td>"
             )
@@ -479,7 +502,7 @@ def render_figure_html(
         .swatch.up {{ background: var(--up); }}
         .swatch.down {{ background: var(--down); }}
         .swatch.neutral {{ background: var(--neutral); }}
-        .swatch.mixed {{ background: linear-gradient(90deg, var(--up) 0 50%, var(--down) 50% 100%); }}
+        .swatch.mixed {{ background: linear-gradient(90deg, var(--down) 0 33.333%, var(--up) 33.333% 66.667%, var(--down) 66.667% 100%); }}
         .groups {{
           display: grid;
           grid-template-columns: repeat(auto-fit, minmax(460px, 1fr));
@@ -575,9 +598,7 @@ def render_figure_html(
         .arrow-cell.down {{ background: var(--down); }}
         .arrow-cell.neutral {{ background: var(--neutral); }}
         .arrow-cell.empty {{ background: var(--empty); color: #8a949e; }}
-        .arrow-cell.mixed {{
-          background: linear-gradient(90deg, var(--up) 0 50%, var(--down) 50% 100%);
-        }}
+        .arrow-cell.mixed {{ background: linear-gradient(90deg, var(--up) 0 50%, var(--down) 50% 100%); }}
         .arrow-cell span {{
           display: inline-flex;
           align-items: center;
@@ -932,11 +953,109 @@ def paste_fish_asset_png(
     image.alpha_composite(fish, (x, y))
 
 
-def mixed_cell_colors(value: str, colors: dict[str, tuple[int, int, int]]) -> tuple[tuple[int, int, int], tuple[int, int, int]]:
-    directions = [char for char in value if char in "↑↓"]
-    if directions and directions[0] == "↓":
-        return colors["down"], colors["up"]
-    return colors["up"], colors["down"]
+def mixed_cell_colors(value: str, colors: dict[str, tuple[int, int, int]]) -> list[tuple[int, int, int]]:
+    return [colors["up"] if direction == "↑" else colors["down"] for direction in arrow_directions(value)]
+
+
+def text_width(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.ImageFont) -> float:
+    if not text:
+        return 0.0
+    if hasattr(draw, "textlength"):
+        return float(draw.textlength(text, font=font))
+    return float(text_bbox(draw, text, font)[0])
+
+
+def positioned_text_lines(
+    draw: ImageDraw.ImageDraw,
+    text: str,
+    box: tuple[int, int, int, int],
+    font: ImageFont.ImageFont,
+    align: str = "center",
+    valign: str = "center",
+    padding: int = 18,
+    spacing: int = 8,
+) -> list[tuple[str, float, int]]:
+    x1, y1, x2, y2 = box
+    max_width = max(12, x2 - x1 - padding * 2)
+    lines = wrap_text(draw, text, font, max_width)
+    text_h = len(lines) * line_height(font) + max(0, len(lines) - 1) * spacing
+    if valign == "top":
+        y = y1 + padding
+    elif valign == "bottom":
+        y = y2 - padding - text_h
+    else:
+        y = y1 + max(0, (y2 - y1 - text_h) // 2)
+
+    positioned: list[tuple[str, float, int]] = []
+    for line in lines:
+        w, _ = text_bbox(draw, line, font)
+        if align == "left":
+            line_x = x1 + padding
+        elif align == "right":
+            line_x = x2 - padding - w
+        else:
+            line_x = x1 + max(0, (x2 - x1 - w) // 2)
+        positioned.append((line, float(line_x), y))
+        y += line_height(font) + spacing
+    return positioned
+
+
+def draw_equal_direction_segments_png(
+    draw: ImageDraw.ImageDraw,
+    box: tuple[int, int, int, int],
+    segment_colors: list[tuple[int, int, int]],
+) -> None:
+    x1, y1, x2, y2 = box
+    segment_count = max(1, len(segment_colors))
+    for index, fill in enumerate(segment_colors):
+        left = x1 + round((x2 - x1) * index / segment_count)
+        right = x1 + round((x2 - x1) * (index + 1) / segment_count)
+        draw.rectangle((left, y1, right, y2), fill=fill)
+
+
+def draw_aligned_mixed_cell_png(
+    draw: ImageDraw.ImageDraw,
+    box: tuple[int, int, int, int],
+    value: str,
+    colors: dict[str, tuple[int, int, int]],
+    font: ImageFont.ImageFont,
+) -> None:
+    segment_colors = mixed_cell_colors(value, colors)
+    if len(segment_colors) < 2:
+        draw.rectangle(box, fill=segment_colors[0] if segment_colors else colors["empty"])
+        return
+
+    x1, y1, x2, y2 = box
+    positioned_lines = positioned_text_lines(draw, value, box, font, padding=10, spacing=2)
+    if len(positioned_lines) != 1:
+        draw_equal_direction_segments_png(draw, box, segment_colors)
+        return
+
+    line, line_x, _ = positioned_lines[0]
+    arrow_centers: list[tuple[float, tuple[int, int, int]]] = []
+    for char_index, char in enumerate(line):
+        if char not in "↑↓":
+            continue
+        prefix_w = text_width(draw, line[:char_index], font)
+        char_w = text_width(draw, line[: char_index + 1], font) - prefix_w
+        if char_w <= 0:
+            char_w = text_width(draw, char, font)
+        fill = colors["up"] if char == "↑" else colors["down"]
+        arrow_centers.append((line_x + prefix_w + char_w / 2, fill))
+
+    if len(arrow_centers) != len(segment_colors):
+        draw_equal_direction_segments_png(draw, box, segment_colors)
+        return
+
+    # Boundaries are placed between rendered arrow centers, so every arrow sits inside its own color band.
+    boundaries = [float(x1)]
+    boundaries.extend((left[0] + right[0]) / 2 for left, right in zip(arrow_centers, arrow_centers[1:]))
+    boundaries.append(float(x2))
+
+    for index, (_, fill) in enumerate(arrow_centers):
+        left = max(x1, min(x2, round(boundaries[index])))
+        right = max(x1, min(x2, round(boundaries[index + 1])))
+        draw.rectangle((left, y1, right, y2), fill=fill)
 
 
 def cell_fill_png(value: str, colors: dict[str, tuple[int, int, int]]) -> tuple[str, tuple[int, int, int] | None]:
@@ -1044,20 +1163,18 @@ def draw_table_png(
         cx = x + widths["row"]
         for column in columns:
             value = row.get(column["key"], "")
-            mode, solid = cell_fill_png(value, colors)
-            if mode == "mixed":
-                left, right = mixed_cell_colors(value, colors)
-                draw.rectangle((cx, y, cx + widths["cell"] // 2, y + row_h), fill=left)
-                draw.rectangle((cx + widths["cell"] // 2, y, cx + widths["cell"], y + row_h), fill=right)
-            else:
-                draw.rectangle((cx, y, cx + widths["cell"], y + row_h), fill=solid or colors["empty"])
-            draw.rectangle((cx, y, cx + widths["cell"], y + row_h), outline=line, width=2)
             font = fonts["arrow_small"] if len(value) >= 4 else fonts["arrow"]
             text_w, text_h = text_bbox(draw, value, font)
             badge_w = min(widths["cell"] - 28, max(72, text_w + 28))
             badge_h = min(row_h - 18, max(54, text_h + 22))
             bx = cx + (widths["cell"] - badge_w) // 2
             by = y + (row_h - badge_h) // 2
+            mode, solid = cell_fill_png(value, colors)
+            if mode == "mixed":
+                draw_aligned_mixed_cell_png(draw, (cx, y, cx + widths["cell"], y + row_h), value, colors, font)
+            else:
+                draw.rectangle((cx, y, cx + widths["cell"], y + row_h), fill=solid or colors["empty"])
+            draw.rectangle((cx, y, cx + widths["cell"], y + row_h), outline=line, width=2)
             if value:
                 draw.rounded_rectangle((bx, by, bx + badge_w, by + badge_h), radius=12, fill=(255, 255, 255, 185))
             draw_wrapped_text(draw, value, (cx, y, cx + widths["cell"], y + row_h), font, (7, 16, 24), padding=10, spacing=2)
@@ -1145,8 +1262,10 @@ def draw_legend_png(
         swatch_center = iy + item_h // 2
         swatch = (x + 18, swatch_center - 12, x + 58, swatch_center + 12)
         if kind == "mixed":
-            draw.rectangle((swatch[0], swatch[1], (swatch[0] + swatch[2]) // 2, swatch[3]), fill=colors["up"])
-            draw.rectangle(((swatch[0] + swatch[2]) // 2, swatch[1], swatch[2], swatch[3]), fill=colors["down"])
+            third = (swatch[2] - swatch[0]) / 3
+            draw.rectangle((swatch[0], swatch[1], round(swatch[0] + third), swatch[3]), fill=colors["down"])
+            draw.rectangle((round(swatch[0] + third), swatch[1], round(swatch[0] + third * 2), swatch[3]), fill=colors["up"])
+            draw.rectangle((round(swatch[0] + third * 2), swatch[1], swatch[2], swatch[3]), fill=colors["down"])
         else:
             draw.rectangle(swatch, fill=colors[kind])
         draw.rectangle(swatch, outline=(70, 79, 88), width=1)
@@ -1230,13 +1349,13 @@ def default_labels() -> dict[str, str]:
 
     return {
         "title": "Zebrafish: Neurotoxicity and Neuroactivity",
-        "subtitle": "The color of the cell reflects the direction of change; mixed arrows are colored in two halves.",
+        "subtitle": "The color of the cell reflects the direction of change; mixed arrows are colored under each arrow.",
         "top_section": "Metabolites and neurotransmitter systems",
         "bottom_section": "Behavioral indicators",
         "row_label": "Parameter",
         "up_label": "Increase: ↑",
         "down_label": "Decrease: ↓",
-        "mixed_label": "Opposite directions: ↑↓",
+        "mixed_label": "Mixed directions: ↓↑↓",
         "neutral_label": "No significant change: —",
     }
 
@@ -1252,7 +1371,7 @@ def sidebar_text_labels(labels: dict[str, str], token: str) -> dict[str, str]:
     with st.sidebar.expander("Легенда и цвета", expanded=False):
         edited["up_label"] = st.text_input("Подпись ↑", edited["up_label"], key=f"{token}_up_label")
         edited["down_label"] = st.text_input("Подпись ↓", edited["down_label"], key=f"{token}_down_label")
-        edited["mixed_label"] = st.text_input("Подпись ↑↓", edited["mixed_label"], key=f"{token}_mixed_label")
+        edited["mixed_label"] = st.text_input("Подпись смешанных стрелок", edited["mixed_label"], key=f"{token}_mixed_label")
         edited["neutral_label"] = st.text_input("Подпись -", edited["neutral_label"], key=f"{token}_neutral_label")
     return edited
 
@@ -1394,7 +1513,7 @@ def main() -> None:
 
     st.caption(
         f"Лист: `{parsed['sheet']}`. Строка с препаратами: `{parsed['header_row']}`. "
-        "Смешанные значения вроде `↓↑` или `↓↑↓↑` автоматически получают половинную окраску; `≈` отображается как `-`."
+        "Смешанные значения вроде `↓↑` или `↓↑↓↑` автоматически окрашиваются под положением каждой стрелки; `≈` отображается как `-`."
     )
 
     edit_tabs = st.tabs([group["label"] for group in parsed["groups"]])

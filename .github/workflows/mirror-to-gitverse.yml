@@ -1,0 +1,58 @@
+name: Mirror to GitVerse
+
+on:
+  # Запускать после любого push
+  push:
+    branches:
+      - "**"
+    tags:
+      - "**"
+
+  # Возможность запустить вручную из GitHub Actions
+  workflow_dispatch:
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+
+    steps:
+      # Получаем полный репозиторий со всей историей коммитов
+      - name: Checkout full repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Полностью синхронизируем репозиторий с GitVerse
+      - name: Mirror to GitVerse
+        env:
+          # Токен доступа к GitVerse
+          GITVERSE_TOKEN: ${{ secrets.GITVERSE_TOKEN }}
+
+          # Имя пользователя или организации в GitVerse
+          GITVERSE_OWNER: ${{ vars.GITVERSE_OWNER }}
+
+        run: |
+          # Проверяем, что токен GitVerse задан
+          if [ -z "$GITVERSE_TOKEN" ]; then
+            echo "Ошибка: secret GITVERSE_TOKEN не задан"
+            exit 1
+          fi
+
+          # Проверяем, что владелец GitVerse задан
+          if [ -z "$GITVERSE_OWNER" ]; then
+            echo "Ошибка: variable GITVERSE_OWNER не задан"
+            exit 1
+          fi
+
+          # Получаем имя текущего репозитория
+          REPO_NAME="${GITHUB_REPOSITORY#*/}"
+
+          # Формируем адрес репозитория GitVerse
+          GITVERSE_URL="https://oauth2:${GITVERSE_TOKEN}@gitverse.ru/${GITVERSE_OWNER}/${REPO_NAME}.git"
+
+          # Добавляем удалённый репозиторий GitVerse
+          git remote add gitverse "$GITVERSE_URL"
+
+          # Полностью зеркалируем репозиторий:
+          # ветки, теги, историю и служебные ссылки Git
+          git push gitverse --mirror

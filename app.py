@@ -28,6 +28,8 @@ DEFAULT_LAYOUT = {
     "row_width": 650,
     "cell_width": 260,
 }
+EXPORT_DPI = 1000
+TIFF_EXPORT_DPI = 600
 
 
 @dataclass(frozen=True)
@@ -178,7 +180,7 @@ def source_bytes(uploaded_file: Any | None) -> tuple[bytes, str]:
     if uploaded_file is not None:
         data = uploaded_file.getvalue()
         return data, uploaded_file.name
-    st.info("Загрузите `.xlsx` файл через боковую панель, после этого появятся редактор, визуализация и экспорт PNG.")
+    st.info("Загрузите `.xlsx` файл через боковую панель, после этого появятся редактор, визуализация и экспорт PNG/TIFF.")
     st.stop()
 
 
@@ -438,6 +440,7 @@ def render_figure_html(
           --neutral: {colors["neutral"]};
           --empty: {colors["empty"]};
           --ink: #17212b;
+          --subtitle-ink: #000000;
           --muted: #59646f;
           --line: #c7d0d8;
           --panel: #ffffff;
@@ -471,8 +474,8 @@ def render_figure_html(
         }}
         .subtitle {{
           margin-top: 6px;
-          color: var(--muted);
-          font-size: 15px;
+          color: var(--subtitle-ink);
+          font-size: 17px;
           line-height: 1.35;
         }}
         .legend {{
@@ -1289,7 +1292,7 @@ def render_png_visualization(
     labels: dict[str, str],
     color_values: dict[str, str],
     layout: dict[str, int] | None = None,
-    dpi: int = 600,
+    dpi: int = EXPORT_DPI,
 ) -> bytes:
     layout = normalize_layout(layout)
     colors = {key: hex_to_rgb(value) for key, value in color_values.items()}
@@ -1299,7 +1302,7 @@ def render_png_visualization(
     colors.setdefault("empty", (255, 255, 255))
     fonts = {
         "title": get_font(72, True),
-        "subtitle": get_font(34),
+        "subtitle": get_font(36),
         "legend": get_font(30, True),
         "group": get_font(64, True),
         "section": get_font(32, True),
@@ -1324,7 +1327,7 @@ def render_png_visualization(
     image = Image.new("RGBA", (width, height), (245, 247, 248, 255))
     draw = ImageDraw.Draw(image, "RGBA")
     ink = (23, 33, 43)
-    muted = (89, 100, 111)
+    muted = (0, 0, 0)
 
     legend_x = width - margin - legend_w
     title_box = (margin, margin, legend_x - 60, margin + 100)
@@ -1342,6 +1345,18 @@ def render_png_visualization(
 
     output = BytesIO()
     image.convert("RGB").save(output, format="PNG", dpi=(dpi, dpi), optimize=True)
+    return output.getvalue()
+
+
+def convert_png_to_tiff(png_bytes: bytes, dpi: int = TIFF_EXPORT_DPI) -> bytes:
+    with Image.open(BytesIO(png_bytes)) as image:
+        output = BytesIO()
+        image.convert("RGB").save(
+            output,
+            format="TIFF",
+            dpi=(dpi, dpi),
+            compression="tiff_lzw",
+        )
     return output.getvalue()
 
 
@@ -1386,7 +1401,7 @@ def sidebar_colors(token: str) -> dict[str, str]:
 
 
 def sidebar_layout_controls(token: str) -> dict[str, int]:
-    with st.sidebar.expander("Ширина колонок PNG", expanded=True):
+    with st.sidebar.expander("Ширина колонок изображения", expanded=True):
         row_width = st.slider(
             "Первый столбец с показателями",
             min_value=420,
@@ -1403,7 +1418,7 @@ def sidebar_layout_controls(token: str) -> dict[str, int]:
             step=10,
             key=f"{token}_cell_width",
         )
-        st.caption("Эти настройки влияют на PNG-превью и скачиваемую PNG-картинку.")
+        st.caption("Эти настройки влияют на PNG-превью и скачиваемые PNG/TIFF-картинки.")
     return {"row_width": row_width, "cell_width": cell_width}
 
 
@@ -1524,20 +1539,30 @@ def main() -> None:
 
     st.divider()
     st.subheader("Визуализация")
-    png_bytes = render_png_visualization(edited_groups, labels, colors, layout=layout, dpi=600)
+    png_bytes = render_png_visualization(edited_groups, labels, colors, layout=layout, dpi=EXPORT_DPI)
+    tiff_bytes = convert_png_to_tiff(png_bytes, dpi=TIFF_EXPORT_DPI)
     preview_size = Image.open(BytesIO(png_bytes)).size
     st.caption(
         f"PNG-превью готовой картинки: {preview_size[0]} x {preview_size[1]} px, "
         f"первый столбец {layout['row_width']} px, колонки препаратов {layout['cell_width']} px."
     )
     st.image(png_bytes, use_container_width=True)
-    st.download_button(
-        "Скачать PNG 600 dpi",
-        data=png_bytes,
-        file_name="zebrafish_visualization_600dpi.png",
-        mime="image/png",
-        type="primary",
-    )
+    png_column, tiff_column = st.columns(2)
+    with png_column:
+        st.download_button(
+            f"Скачать PNG {EXPORT_DPI} dpi",
+            data=png_bytes,
+            file_name=f"zebrafish_visualization_{EXPORT_DPI}dpi.png",
+            mime="image/png",
+            type="primary",
+        )
+    with tiff_column:
+        st.download_button(
+            f"Скачать TIFF {TIFF_EXPORT_DPI} dpi",
+            data=tiff_bytes,
+            file_name=f"zebrafish_visualization_{TIFF_EXPORT_DPI}dpi.tiff",
+            mime="image/tiff",
+        )
 
 
 if __name__ == "__main__":
